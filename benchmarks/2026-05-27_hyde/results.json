@@ -1,0 +1,32 @@
+{
+  "test_suite": "default",
+  "description": "HyDE (Hypothetical Document Embeddings) - LLM生成假设文档后检索",
+  "retrieval": {
+    "vector": {
+      "recall@1": 0.3243, "precision@1": 0.5333, "ndcg@1": 0.5333, "hit@1": 0.5333,
+      "recall@3": 0.3830, "precision@3": 0.4000, "ndcg@3": 0.4722, "hit@3": 0.6667,
+      "recall@5": 0.4416, "precision@5": 0.3733, "ndcg@5": 0.4692, "hit@5": 0.7333,
+      "recall@8": 0.5350, "precision@8": 0.3833, "ndcg@8": 0.4904, "hit@8": 0.7333,
+      "mrr": 0.6022, "map": 0.4026
+    },
+    "bm25": {
+      "recall@1": 0.2199, "precision@1": 0.3333, "ndcg@1": 0.3333, "hit@1": 0.3333,
+      "recall@3": 0.3603, "precision@3": 0.3778, "ndcg@3": 0.3871, "hit@3": 0.6000,
+      "recall@5": 0.4590, "precision@5": 0.3467, "ndcg@5": 0.3934, "hit@5": 0.6667,
+      "recall@8": 0.5228, "precision@8": 0.3083, "ndcg@8": 0.3797, "hit@8": 0.7333,
+      "mrr": 0.4717, "map": 0.2218
+    },
+    "hybrid": {
+      "recall@1": 0.3440, "precision@1": 0.5333, "ndcg@1": 0.5333, "hit@1": 0.5333,
+      "recall@3": 0.4029, "precision@3": 0.4889, "ndcg@3": 0.5429, "hit@3": 0.6667,
+      "recall@5": 0.4456, "precision@5": 0.4400, "ndcg@5": 0.5340, "hit@5": 0.6667,
+      "recall@8": 0.4902, "precision@8": 0.3667, "ndcg@8": 0.4964, "hit@8": 0.6667,
+      "mrr": 0.6121, "map": 0.4038
+    }
+  },
+  "generation": {
+    "faithfulness": 0.9933,
+    "answer_relevance": 0.6067
+  },
+  "per_category": {}
+}

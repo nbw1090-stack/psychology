@@ -1,0 +1,32 @@
+{
+  "test_suite": "default",
+  "description": "Sentence Window Retrieval (Small-to-Big) - 句子级嵌入 + 检索后窗口替换",
+  "retrieval": {
+    "vector": {
+      "recall@1": 0.2097, "precision@1": 0.1333, "ndcg@1": 0.1333, "hit@1": 0.1333,
+      "recall@3": 0.3334, "precision@3": 0.2667, "ndcg@3": 0.2462, "hit@3": 0.4667,
+      "recall@5": 0.3946, "precision@5": 0.2667, "ndcg@5": 0.2706, "hit@5": 0.5333,
+      "recall@8": 0.5933, "precision@8": 0.2667, "ndcg@8": 0.3266, "hit@8": 0.6667,
+      "mrr": 0.3329, "map": 0.2817
+    },
+    "bm25": {
+      "recall@1": 0.2269, "precision@1": 0.2000, "ndcg@1": 0.2000, "hit@1": 0.2000,
+      "recall@3": 0.2681, "precision@3": 0.1778, "ndcg@3": 0.1762, "hit@3": 0.3333,
+      "recall@5": 0.2914, "precision@5": 0.1600, "ndcg@5": 0.1694, "hit@5": 0.3333,
+      "recall@8": 0.3622, "precision@8": 0.1500, "ndcg@8": 0.1820, "hit@8": 0.5333,
+      "mrr": 0.2957, "map": 0.1332
+    },
+    "hybrid": {
+      "recall@1": 0.2153, "precision@1": 0.2000, "ndcg@1": 0.2000, "hit@1": 0.2000,
+      "recall@3": 0.3223, "precision@3": 0.2667, "ndcg@3": 0.2694, "hit@3": 0.5333,
+      "recall@5": 0.3608, "precision@5": 0.2267, "ndcg@5": 0.2586, "hit@5": 0.6000,
+      "recall@8": 0.5201, "precision@8": 0.2333, "ndcg@8": 0.3027, "hit@8": 0.6667,
+      "mrr": 0.4044, "map": 0.2250
+    }
+  },
+  "generation": {
+    "faithfulness": 1.0000,
+    "answer_relevance": 0.4800
+  },
+  "per_category": {}
+}

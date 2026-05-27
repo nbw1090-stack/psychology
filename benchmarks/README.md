@@ -16,7 +16,11 @@ benchmarks/
 
 | 日期 | 描述 | 关键指标 |
 |------|------|----------|
-| [2026-05-22](./2026-05-22_baseline/ARCHITECTURE.md) | 首次基线评估 | hybrid Recall@5=0.564, MRR=0.383, Hit@5=0.533 |
+| [2026-05-27](./2026-05-27_hyde/README.md) | HyDE (假设文档嵌入) | hybrid MRR=0.612 (+27%), Answer Relevance=0.607 ⭐ — MRR 首次破0.6，排序质量新高 |
+| [2026-05-27](./2026-05-27_sentence_window/README.md) | Sentence Window (Small-to-Big) | hybrid Recall@5=0.361 ⚠️ — 全面退化，单句嵌入不适用于领域知识检索 |
+| [2026-05-25](./2026-05-25_topk30/README.md) | 扩大检索网 (top_k 8→30) | hybrid MRR=0.483 (+11%), Hit@8=0.800 — Recall 持平 |
+| [2026-05-23](./2026-05-23_hierarchical/README.md) | 三层层级索引 | vector MRR=0.494 (+50%), Answer Relevance=0.573 (+9%) |
+| [2026-05-22](./2026-05-22_baseline/ARCHITECTURE.md) | 首次基线评估 (flat chunks) | hybrid Recall@5=0.564, MRR=0.383, Hit@5=0.533 |
 
 ## 如何使用
 

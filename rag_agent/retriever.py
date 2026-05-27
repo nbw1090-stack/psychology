@@ -14,11 +14,12 @@ from . import logger
 
 @dataclass
 class RetrievalConfig:
-    top_k: int = 8
+    top_k: int = 30
     retrieval_mode: str = "hybrid"  # "vector" | "bm25" | "hybrid"
     enable_rerank: bool = True
-    rerank_top_k: int = 4
+    rerank_top_k: int = 8
     enable_query_rewrite: bool = True
+    enable_hyde: bool = False          # HyDE: 生成假设文档替代/补充查询
 
 
 DEFAULT_SEPARATORS = [
@@ -252,6 +253,39 @@ QUERY_REWRITE_PROMPT = """你是一个查询优化专家。用户的原始问题
 改写后的查询："""
 
 
+HYDE_PROMPT = """你是一个心理学领域的知识专家。请根据用户的问题，写一段假设的参考答案。
+
+要求：
+- 尽量全面、专业地回答问题
+- 使用学术化的中文表述
+- 控制在200-400字
+- 只输出答案文本，不要加解释
+
+用户问题: {query}
+
+假设答案："""
+
+
+def hyde_generate(llm: BaseChatModel, query: str) -> str:
+    """HyDE (Hypothetical Document Embeddings): 生成假设文档，用于替代/补充原始查询做检索。
+
+    参考论文: Gao et al., "Precise Zero-Shot Dense Retrieval without Relevance Labels" (arXiv 2212.10496)
+    """
+    logger.sub("HyDE 假设文档生成")
+    messages = [
+        HumanMessage(content=HYDE_PROMPT.format(query=query)),
+    ]
+    try:
+        response = llm.invoke(messages)
+        hypothesis = response.content.strip()
+        logger.info(f"  原始查询: \"{query}\"")
+        logger.info(f"  假设文档 ({len(hypothesis)} 字): \"{hypothesis[:120]}...\"")
+        return hypothesis
+    except Exception as e:
+        logger.info(f"  HyDE 生成失败 ({e})，使用原始查询")
+        return query
+
+
 def rewrite_query(llm: BaseChatModel, query: str) -> List[str]:
     logger.sub("查询改写 (Query Rewrite)")
     messages = [
@@ -298,12 +332,16 @@ def retrieve(
     logger.keyval("检索模式", cfg.retrieval_mode)
     logger.keyval("top_k", str(cfg.top_k))
     logger.keyval("Rerank", f"{cfg.enable_rerank} (top_k={cfg.rerank_top_k})")
-    logger.keyval("查询改写", str(cfg.enable_query_rewrite))
+    logger.keyval("HyDE", str(cfg.enable_hyde))
 
-    # 1. 查询改写
-    queries = [query]
-    if cfg.enable_query_rewrite and llm:
+    # 1. HyDE 生成假设文档（优先于普通改写）
+    if cfg.enable_hyde and llm:
+        hyde_query = hyde_generate(llm, query)
+        queries = [query, hyde_query]  # 原始查询 + 假设文档都检索
+    elif cfg.enable_query_rewrite and llm:
         queries = rewrite_query(llm, query)
+    else:
+        queries = [query]
 
     # 2. 多查询检索
     all_candidates: List[Tuple[Document, float]] = []

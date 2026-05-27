@@ -1,6 +1,6 @@
 {
   "source": "焦虑心理学.pdf",
-  "generated_at": "20260522_215810",
+  "generated_at": "20260522_235517",
   "chunk_size": 500,
   "chunk_overlap": 80,
   "chunk_strategy": "sentence",

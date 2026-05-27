@@ -1,5 +1,6 @@
 import os
 import pickle
+from collections import defaultdict
 from dataclasses import dataclass, field
 
 from .document import load_documents, chunk_documents, save_chunks_to_json, ChunkingConfig
@@ -9,6 +10,10 @@ from .retriever import (
     retrieve, format_context, RetrievalConfig, BM25Retriever,
 )
 from .generator import create_llm, generate
+from .hierarchy import (
+    build_hierarchy, save_hierarchy, HierarchyIndex,
+    flatten_l1_l2_texts, is_macro_query,
+)
 from . import logger
 
 
@@ -21,13 +26,14 @@ class RAGConfig:
     chunk_size: int = 500
     chunk_overlap: int = 80
     chunk_strategy: str = "sentence"
-    top_k: int = 8
+    top_k: int = 30
     collection_name: str = "rag_agent"
 
     retrieval_mode: str = "hybrid"
     enable_rerank: bool = True
-    rerank_top_k: int = 4
+    rerank_top_k: int = 8
     enable_query_rewrite: bool = True
+    enable_hyde: bool = True           # HyDE: 生成假设文档后再检索
 
 
 class RAGPipeline:
@@ -103,8 +109,37 @@ class RAGPipeline:
         )
         chunks = chunk_documents(docs, chunk_cfg)
 
-        # 本地化存储 chunk 结果，方便调优
+        # 本地化存储父 chunk 结果，方便调优
         save_chunks_to_json(chunks, config=chunk_cfg)
+
+        # ========== 层级索引构建 ==========
+        # 按 source 分组 chunks
+        chunks_by_source: dict[str, list] = defaultdict(list)
+        for i, ch in enumerate(chunks):
+            src = ch.metadata.get("source", "unknown")
+            # 注入 chunk_id 到 metadata，方便层级映射
+            ch.metadata["chunk_id"] = i
+            chunks_by_source[src].append(ch)
+
+        hierarchy = HierarchyIndex()
+        summary_llm = create_llm(temperature=0.1)
+        for src, src_chunks in chunks_by_source.items():
+            src_name = os.path.basename(src)
+            node = build_hierarchy(src_chunks, summary_llm, src_name)
+            hierarchy.documents.append(node)
+
+        # 保存层级索引 JSON
+        save_hierarchy(hierarchy)
+
+        # 将 L1/L2 摘要向量化，写入向量库（标记 source="hierarchy"）
+        summary_texts = flatten_l1_l2_texts(hierarchy)
+        from langchain_core.documents import Document as LangchainDocument
+        summary_docs_lc = [
+            LangchainDocument(page_content=t, metadata={"source": "hierarchy", "level": "summary"})
+            for t in summary_texts
+        ]
+        logger.info(f"[Hierarchy] {len(summary_docs_lc)} 条摘要待写入向量库")
+        # ========== 层级索引构建结束 ==========
 
         embeddings = create_embeddings()
         vs = create_vectorstore(
@@ -113,6 +148,11 @@ class RAGPipeline:
             self.config.collection_name,
         )
         add_documents(vs, chunks)
+
+        # 写入层级摘要到向量库
+        if summary_docs_lc:
+            add_documents(vs, summary_docs_lc)
+            logger.info(f"[Hierarchy] {len(summary_docs_lc)} 条摘要已写入向量库")
 
         # 删除旧的 BM25 索引，force rebuild on next query
         bm25_path = os.path.join(self.db_dir, "bm25_index.pkl")
@@ -137,21 +177,52 @@ class RAGPipeline:
         if self.config.retrieval_mode in ("bm25", "hybrid"):
             bm25 = self._get_bm25(vs)
 
-        retrieval_cfg = RetrievalConfig(
-            top_k=self.config.top_k,
-            retrieval_mode=self.config.retrieval_mode,
-            enable_rerank=self.config.enable_rerank,
-            rerank_top_k=self.config.rerank_top_k,
-            enable_query_rewrite=self.config.enable_query_rewrite,
-        )
+        # ===== 层级检索路由 =====
+        if is_macro_query(question):
+            logger.info("[Hierarchy] 检测到宏观问题，启用层级检索")
+            # 先检索 L1/L2 摘要（source="hierarchy"），需要额外调用
+            try:
+                summary_docs = vs.similarity_search(
+                    question, k=6,
+                    filter={"source": "hierarchy"},
+                )
+                logger.info(f"[Hierarchy]   摘要检索命中 {len(summary_docs)} 条")
+            except Exception:
+                # 如果不支持 filter，回退到无过滤检索
+                all_vs_docs = vs.similarity_search(question, k=12)
+                summary_docs = [d for d in all_vs_docs
+                                if d.metadata.get("source") == "hierarchy"][:6]
+                logger.info(f"[Hierarchy]   摘要检索（无过滤回退）命中 {len(summary_docs)} 条")
 
-        docs = retrieve(
-            query=question,
-            vectorstore=vs,
-            llm=self.llm,
-            bm25=bm25,
-            config=retrieval_cfg,
-        )
+            # 补充 L3 段落
+            detail_docs = vs.similarity_search(question, k=6)
+            # 去重 + 合并
+            seen = set()
+            docs = []
+            for d in summary_docs + detail_docs:
+                key = d.page_content[:80]
+                if key not in seen:
+                    seen.add(key)
+                    docs.append(d)
+            docs = docs[:12]
+            logger.info(f"[Hierarchy]   融合后共 {len(docs)} 条")
+        else:
+            retrieval_cfg = RetrievalConfig(
+                top_k=self.config.top_k,
+                retrieval_mode=self.config.retrieval_mode,
+                enable_rerank=self.config.enable_rerank,
+                rerank_top_k=self.config.rerank_top_k,
+                enable_query_rewrite=self.config.enable_query_rewrite,
+                enable_hyde=self.config.enable_hyde,
+            )
+            docs = retrieve(
+                query=question,
+                vectorstore=vs,
+                llm=self.llm,
+                bm25=bm25,
+                config=retrieval_cfg,
+            )
+        # ===== 层级检索路由结束 =====
 
         context = format_context(docs)
         answer = generate(self.llm, question, context)

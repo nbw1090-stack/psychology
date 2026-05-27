@@ -1,0 +1,32 @@
+{
+  "test_suite": "default",
+  "description": "扩大检索网 (top_k 8→30, rerank_top_k 4→8) 评估结果",
+  "retrieval": {
+    "vector": {
+      "recall@1": 0.2271, "precision@1": 0.4000, "ndcg@1": 0.4000, "hit@1": 0.4000,
+      "recall@3": 0.4148, "precision@3": 0.4444, "ndcg@3": 0.4882, "hit@3": 0.6000,
+      "recall@5": 0.5595, "precision@5": 0.4133, "ndcg@5": 0.5023, "hit@5": 0.7333,
+      "recall@8": 0.6711, "precision@8": 0.4000, "ndcg@8": 0.5123, "hit@8": 0.7333,
+      "mrr": 0.5351, "map": 0.4106
+    },
+    "bm25": {
+      "recall@1": 0.2869, "precision@1": 0.3333, "ndcg@1": 0.3333, "hit@1": 0.3333,
+      "recall@3": 0.3256, "precision@3": 0.3111, "ndcg@3": 0.3531, "hit@3": 0.4667,
+      "recall@5": 0.3576, "precision@5": 0.2800, "ndcg@5": 0.3389, "hit@5": 0.5333,
+      "recall@8": 0.4336, "precision@8": 0.2667, "ndcg@8": 0.3397, "hit@8": 0.6000,
+      "mrr": 0.4289, "map": 0.2542
+    },
+    "hybrid": {
+      "recall@1": 0.2869, "precision@1": 0.3333, "ndcg@1": 0.3333, "hit@1": 0.3333,
+      "recall@3": 0.4100, "precision@3": 0.4000, "ndcg@3": 0.4374, "hit@3": 0.6000,
+      "recall@5": 0.5590, "precision@5": 0.4133, "ndcg@5": 0.4896, "hit@5": 0.7333,
+      "recall@8": 0.6453, "precision@8": 0.3750, "ndcg@8": 0.4885, "hit@8": 0.8000,
+      "mrr": 0.4828, "map": 0.3878
+    }
+  },
+  "generation": {
+    "faithfulness": 1.0000,
+    "answer_relevance": 0.5800
+  },
+  "per_category": {}
+}
