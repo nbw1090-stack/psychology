@@ -3,7 +3,7 @@ import sys
 
 from dotenv import load_dotenv
 
-from .pipeline import RAGPipeline, RAGConfig, DB_DIR_DEFAULT, DOCS_DIR_DEFAULT
+from .pipeline import RAGPipeline, RAGConfig, AgentRAGPipeline, DB_DIR_DEFAULT, DOCS_DIR_DEFAULT
 from . import logger as log
 from .evaluation import TestSuite, RAGEvaluator, EvalReporter
 
@@ -14,13 +14,25 @@ def _add_verbose_arg(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--verbose", "-v", action="store_true", help="显示详细日志")
 
 
+def _add_agent_arg(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument("--agent", action="store_true", help="使用 LangGraph Agent 多步推理模式")
+
+
+def _make_pipeline(args, config):
+    """根据 --agent 标志创建对应管线。"""
+    if getattr(args, "agent", False):
+        return AgentRAGPipeline(db_dir=args.db_dir, config=config)
+    return RAGPipeline(db_dir=args.db_dir, config=config)
+
+
 def _add_retrieval_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--top-k", type=int, default=8, help="候选检索数量 (默认8)")
+    parser.add_argument("--top-k", type=int, default=30, help="候选检索数量 (默认30)")
     parser.add_argument("--mode", choices=["vector", "bm25", "hybrid"], default="hybrid",
                         help="检索模式: vector(语义) / bm25(关键词) / hybrid(混合)")
     parser.add_argument("--no-rerank", action="store_true", help="禁用 LLM 精排")
-    parser.add_argument("--rerank-top-k", type=int, default=4, help="精排后保留数量 (默认4)")
+    parser.add_argument("--rerank-top-k", type=int, default=8, help="精排后保留数量 (默认8)")
     parser.add_argument("--no-rewrite", action="store_true", help="禁用查询改写")
+    parser.add_argument("--no-hyde", action="store_true", help="禁用 HyDE 假设文档检索")
 
 
 def cmd_ingest(args):
@@ -28,6 +40,7 @@ def cmd_ingest(args):
     config = RAGConfig(
         chunk_size=args.chunk_size,
         chunk_overlap=args.chunk_overlap,
+        chunk_strategy=args.chunk_strategy,
         collection_name=args.collection,
     )
     pipeline = RAGPipeline(db_dir=args.db_dir, config=config)
@@ -45,8 +58,13 @@ def cmd_query(args):
         enable_rerank=not args.no_rerank,
         rerank_top_k=args.rerank_top_k,
         enable_query_rewrite=not args.no_rewrite,
+        enable_hyde=not args.no_hyde,
     )
-    pipeline = RAGPipeline(db_dir=args.db_dir, config=config)
+    if getattr(args, "agent", False):
+        print("正在初始化 Agent ...", end=" ", flush=True)
+    pipeline = _make_pipeline(args, config)
+    if getattr(args, "agent", False):
+        print("就绪")
     result = pipeline.query(args.question)
     print(f"问题: {result['question']}")
     print(f"回答: {result['answer']}")
@@ -62,10 +80,13 @@ def cmd_interactive(args):
         enable_rerank=not args.no_rerank,
         rerank_top_k=args.rerank_top_k,
         enable_query_rewrite=not args.no_rewrite,
+        enable_hyde=not args.no_hyde,
     )
-    pipeline = RAGPipeline(db_dir=args.db_dir, config=config)
-    print("RAG 交互问答 (输入 'exit' 退出)")
-    print(f"检索模式: {args.mode} | Rerank: {not args.no_rerank} | 查询改写: {not args.no_rewrite}")
+    pipeline = _make_pipeline(args, config)
+    mode_label = "Agent" if getattr(args, "agent", False) else "Pipeline"
+    print(f"RAG 交互问答 ({mode_label} 模式, 输入 'exit' 退出)")
+    print(f"检索: {args.mode} | Rerank: {not args.no_rerank} | "
+          f"查询改写: {not args.no_rewrite} | HyDE: {not args.no_hyde}")
     print("-" * 50)
     while True:
         try:
@@ -110,14 +131,15 @@ def cmd_evaluate(args):
         enable_rerank=not args.no_rerank,
         rerank_top_k=args.rerank_top_k,
         enable_query_rewrite=not args.no_rewrite,
+        enable_hyde=not args.no_hyde if hasattr(args, 'no_hyde') else True,
     )
-    pipeline = RAGPipeline(db_dir=args.db_dir, config=config)
+    pipeline = _make_pipeline(args, config)
 
     # 确定检索模式
     if args.eval_modes:
         modes = [m.strip() for m in args.eval_modes.split(",")]
     else:
-        modes = ["vector", "bm25", "hybrid"]
+        modes = ["vector", "bm25", "hybrid", "hybrid_reranked"]
 
     # 确定 K 值
     if args.k_values:
@@ -179,8 +201,13 @@ def main():
     p_ingest = sub.add_parser("ingest", help="导入文档到向量数据库")
     p_ingest.add_argument("--docs-dir", default=DOCS_DIR_DEFAULT, help="文档目录")
     p_ingest.add_argument("--db-dir", default=DB_DIR_DEFAULT, help="向量数据库目录")
-    p_ingest.add_argument("--chunk-size", type=int, default=256)
+    p_ingest.add_argument("--chunk-size", type=int, default=1200,
+                          help="段落目标大小（默认1200字）")
     p_ingest.add_argument("--chunk-overlap", type=int, default=25)
+    p_ingest.add_argument("--chunk-strategy",
+                          choices=["paragraph", "sentence", "recursive"],
+                          default="paragraph",
+                          help="切分策略: paragraph(段落)/sentence(句子)/recursive(递归)")
     p_ingest.add_argument("--collection", default="rag_agent")
     _add_verbose_arg(p_ingest)
 
@@ -190,6 +217,7 @@ def main():
     p_query.add_argument("--db-dir", default=DB_DIR_DEFAULT)
     p_query.add_argument("--collection", default="rag_agent")
     _add_verbose_arg(p_query)
+    _add_agent_arg(p_query)
     _add_retrieval_args(p_query)
 
     # interactive
@@ -198,6 +226,7 @@ def main():
     p_chat.add_argument("--collection", default="rag_agent")
     p_chat.add_argument("--show-sources", action="store_true")
     _add_verbose_arg(p_chat)
+    _add_agent_arg(p_chat)
     _add_retrieval_args(p_chat)
 
     # evaluate
@@ -222,6 +251,7 @@ def main():
                         help="不保存逐用例评估详情")
     p_eval.add_argument("--quiet", "-q", action="store_true", help="静默模式，不显示进度条")
     _add_verbose_arg(p_eval)
+    _add_agent_arg(p_eval)
     _add_retrieval_args(p_eval)
 
     args = parser.parse_args()

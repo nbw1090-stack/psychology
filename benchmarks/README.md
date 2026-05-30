@@ -16,6 +16,9 @@ benchmarks/
 
 | 日期 | 描述 | 关键指标 |
 |------|------|----------|
+| [2026-05-29](./2026-05-29_agent_architecture/ARCHITECTURE.md) | LangGraph Agent 架构升级 | Faithfulness=0.903 (+5.2%), Answer Relevance=0.913 ⭐ — Agent 层 Query Understanding + Claim Verification + 置信度感知 |
+| [2026-05-28](./2026-05-28_reranker_fixed/ARCHITECTURE.md) | Reranker 评估修复 | reranked MRR=0.733 (+34%), Hit@1=0.733 (+57%) ⭐ — 全指标历史最高 |
+| [2026-05-28](./2026-05-28_paragraph_chunking/ARCHITECTURE.md) | 段落级 Chunking + v4 Embedding | hybrid Recall@5=0.669 (+40%), Answer Relevance=0.933 (+50%) |
 | [2026-05-27](./2026-05-27_hyde/README.md) | HyDE (假设文档嵌入) | hybrid MRR=0.612 (+27%), Answer Relevance=0.607 ⭐ — MRR 首次破0.6，排序质量新高 |
 | [2026-05-27](./2026-05-27_sentence_window/README.md) | Sentence Window (Small-to-Big) | hybrid Recall@5=0.361 ⚠️ — 全面退化，单句嵌入不适用于领域知识检索 |
 | [2026-05-25](./2026-05-25_topk30/README.md) | 扩大检索网 (top_k 8→30) | hybrid MRR=0.483 (+11%), Hit@8=0.800 — Recall 持平 |

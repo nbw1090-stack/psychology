@@ -4,7 +4,7 @@ from typing import List, Tuple
 import numpy as np
 from sklearn.feature_extraction.text import TfidfVectorizer
 from langchain_core.documents import Document
-import jieba
+from langchain_chroma import Chroma
 from langchain_core.vectorstores import VectorStore
 from langchain_core.language_models import BaseChatModel
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -40,6 +40,8 @@ class BM25Retriever:
         self._documents: List[Document] = []
 
     def _tokenize(self, text: str) -> List[str]:
+        import jieba
+        jieba.setLogLevel(jieba.logging.INFO + 1)  # suppress "Building prefix dict" spam
         tokens = list(jieba.cut(text))
         tokens = [t.strip() for t in tokens if t.strip()]
         return tokens
@@ -189,7 +191,7 @@ def _llm_rerank(
 
     doc_texts = []
     for i, (doc, _) in enumerate(documents):
-        text = doc.page_content[:500].replace("\n", " ")
+        text = doc.page_content[:800].replace("\n", " ")
         doc_texts.append(f"[文档{i + 1}]: {text}")
 
     prompt = "请评估以下文档与用户问题的相关性：\n\n"
@@ -390,15 +392,122 @@ def retrieve(
     return docs
 
 
+def expand_context(
+    docs: List[Document],
+    vectorstore: Chroma,
+    window: int = 1,
+) -> List[Document]:
+    """对检索结果扩展前后 N 个段落。
+
+    通过 chunk_id 查找 prev_chunk_id / next_chunk_id，
+    再从向量库按 metadata 过滤取出相邻段落。
+    """
+    if window <= 0 or not docs:
+        return docs
+
+    logger.sub("上下文扩展 (Context Expansion)")
+    logger.info(f"  扩展窗口: 前后各 {window} 段")
+
+    neighbor_ids: set[str] = set()
+    for doc in docs:
+        prev_id = doc.metadata.get("prev_chunk_id", "")
+        next_id = doc.metadata.get("next_chunk_id", "")
+        if prev_id:
+            neighbor_ids.add(prev_id)
+        if next_id:
+            neighbor_ids.add(next_id)
+
+    # 排除已在结果中的 chunk
+    existing_ids = {doc.metadata.get("chunk_id", "") for doc in docs}
+    fetch_ids = neighbor_ids - existing_ids
+
+    if not fetch_ids:
+        logger.info(f"  无需扩展（已包含相邻段落）")
+        return docs
+
+    # 从 ChromaDB 按 chunk_id 过滤查询
+    expanded: List[Document] = []
+    try:
+        collection = vectorstore._collection
+        for cid in fetch_ids:
+            results = collection.get(
+                where={"chunk_id": cid},
+                include=["documents", "metadatas"],
+            )
+            if results and results.get("documents"):
+                meta = dict(results["metadatas"][0]) if results["metadatas"] else {}
+                meta["is_expanded"] = True
+                expanded.append(Document(
+                    page_content=results["documents"][0],
+                    metadata=meta,
+                ))
+    except Exception as e:
+        logger.info(f"  上下文扩展查询失败 ({e})，跳过扩展")
+        return docs
+
+    # 合并并排序
+    merged = list(docs) + expanded
+
+    # 按 (book_title, chapter_index, paragraph_index) 排序
+    def _sort_key(doc: Document) -> Tuple:
+        m = doc.metadata
+        return (
+            m.get("book_title", ""),
+            m.get("chapter_index", 0),
+            m.get("paragraph_index", 0),
+        )
+    merged.sort(key=_sort_key)
+
+    # 去重
+    seen: set[str] = set()
+    deduped: List[Document] = []
+    for doc in merged:
+        cid = doc.metadata.get("chunk_id", "")
+        if cid in seen:
+            continue
+        seen.add(cid)
+        deduped.append(doc)
+
+    logger.info(f"  原始 {len(docs)} → 扩展后 {len(deduped)} 条 "
+                f"(新增 {len(deduped) - len(docs)} 段相邻段落)")
+    return deduped
+
+
 def format_context(docs: List[Document]) -> str:
+    # 分离核心检索结果和上下文扩展结果
+    primary = [d for d in docs if not d.metadata.get("is_expanded")]
+    supplementary = [d for d in docs if d.metadata.get("is_expanded")]
+
+    def _source_label(doc: Document) -> str:
+        book = doc.metadata.get("book_title", "")
+        chapter = doc.metadata.get("chapter_title", "")
+        para_idx = doc.metadata.get("paragraph_index")
+        if book:
+            source_info = book
+        else:
+            source_info = doc.metadata.get("source", "unknown")
+        if chapter:
+            source_info += f" > {chapter}"
+        if para_idx is not None:
+            source_info += f" (第{para_idx + 1}段)"
+        return source_info
+
     parts = []
-    for i, doc in enumerate(docs, 1):
-        source = doc.metadata.get("source", "unknown")
-        parts.append(f"[文档 {i}] (来源: {source})\n{doc.page_content}")
+    for i, doc in enumerate(primary, 1):
+        label = _source_label(doc)
+        parts.append(f"[文档 {i}] (来源: {label})\n{doc.page_content}")
+
+    if supplementary:
+        parts.append("【以下为补充上下文，仅供参考】")
+        for i, doc in enumerate(supplementary, 1):
+            label = _source_label(doc)
+            parts.append(f"[补充 {i}] (来源: {label})\n{doc.page_content}")
+
     context = "\n\n---\n\n".join(parts)
 
     logger.sub("上下文组装 (Context)")
-    logger.info(f"  共 {len(docs)} 个文档块, 总长度 {len(context)} 字符")
+    logger.info(f"  核心 {len(primary)} + 补充 {len(supplementary)} = {len(docs)} 个文档块, "
+                f"总长度 {len(context)} 字符")
     if logger.is_verbose():
         for i, part in enumerate(parts):
             logger.content_block(f"文档块 {i + 1}", part, max_len=300)

@@ -19,6 +19,7 @@ from ..pipeline import RAGPipeline, RAGConfig
 from ..retriever import (
     retrieve, RetrievalConfig, BM25Retriever,
     _vector_search, _bm25_search, _rrf_fusion, _deduplicate_docs,
+    _llm_rerank,
 )
 from ..vectorstore import load_vectorstore
 from .. import logger as log
@@ -105,15 +106,16 @@ class RAGEvaluator:
     # ==================== 检索评估 ====================
 
     def _get_retrieval_docs(
-        self, question: str, mode: str, top_k: int = 20
+        self, question: str, mode: str, top_k: int = 20, enable_rerank: bool = False
     ) -> List[Tuple[any, float]]:
         """
         使用指定检索模式获取文档列表。
 
         Args:
             question: 查询问题
-            mode: "vector" | "bm25" | "hybrid"
+            mode: "vector" | "bm25" | "hybrid" | "hybrid_reranked"
             top_k: 检索数量
+            enable_rerank: 是否对结果应用 LLM reranker
 
         Returns:
             List of (Document, score) tuples
@@ -125,17 +127,26 @@ class RAGEvaluator:
         )
 
         if mode == "vector":
-            return list(_vector_search(question, vs, top_k))
+            raw = list(_vector_search(question, vs, top_k))
         elif mode == "bm25":
             bm25 = self.pipeline._get_bm25(vs)
-            return list(_bm25_search(question, bm25, top_k))
-        elif mode == "hybrid":
+            raw = list(_bm25_search(question, bm25, top_k))
+        elif mode in ("hybrid", "hybrid_reranked"):
             bm25 = self.pipeline._get_bm25(vs)
             vec_results = list(_vector_search(question, vs, top_k))
             bm25_results = list(_bm25_search(question, bm25, top_k))
-            return list(_rrf_fusion(vec_results, bm25_results))[:top_k]
+            raw = list(_rrf_fusion(vec_results, bm25_results))[:top_k]
         else:
             raise ValueError(f"未知检索模式: {mode}")
+
+        # Apply reranker if requested (and mode implies it)
+        if enable_rerank or mode == "hybrid_reranked":
+            rerank_k = self.pipeline.config.rerank_top_k
+            reranked = _llm_rerank(self.llm, question, raw, top_k=rerank_k)
+            # Return as (doc, 0.0) tuples to maintain interface
+            return [(doc, 0.0) for doc in reranked]
+
+        return raw
 
     def _label_chunk_relevance(
         self, question: str, chunk_text: str
